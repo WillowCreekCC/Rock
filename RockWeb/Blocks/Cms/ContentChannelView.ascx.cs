@@ -574,13 +574,13 @@ $(document).ready(function() {
 
             var template = GetTemplate();
 
-            if ( template.InstanceAssigns.ContainsKey( "EnabledCommands" ) )
+            if ( template.Registers.ContainsKey( "EnabledCommands" ) )
             {
-                template.InstanceAssigns["EnabledCommands"] = GetAttributeValue( "EnabledLavaCommands" );
+                template.Registers["EnabledCommands"] = GetAttributeValue( "EnabledLavaCommands" );
             }
             else // this should never happen
             {
-                template.InstanceAssigns.Add( "EnabledCommands", GetAttributeValue( "EnabledLavaCommands" ) );
+                template.Registers.Add( "EnabledCommands", GetAttributeValue( "EnabledLavaCommands" ) );
             }
             
             phContent.Controls.Add( new LiteralControl( template.Render( Hash.FromDictionary( mergeFields ) ) ) );
@@ -667,7 +667,7 @@ $(document).ready(function() {
                             {
                                 qry = qry.Where( i => i.ContentChannelId == contentChannel.Id );
 
-                                if ( contentChannel.RequiresApproval )
+                                if ( contentChannel.RequiresApproval && !contentChannel.ContentChannelType.DisableStatus)
                                 {
                                     // Check for the configured status and limit query to those
                                     var statuses = new List<ContentChannelItemStatus>();
@@ -870,7 +870,7 @@ $(document).ready(function() {
                 if ( channel != null )
                 {
 
-                    cblStatus.Visible = channel.RequiresApproval;
+                    cblStatus.Visible = channel.RequiresApproval && !channel.ContentChannelType.DisableStatus;
 
                     cbSetRssAutodiscover.Visible = channel.EnableRss;
 
@@ -974,7 +974,7 @@ $(document).ready(function() {
         }
 
         /// <summary>
-        /// The PropertyFilter checks for it's property/attribute list in a cached items object before recreating 
+        /// **The PropertyFilter checks for it's property/attribute list in a cached items object before recreating 
         /// them using reflection and loading of generic attributes. Because of this, we're going to load them here
         /// and exclude some properties and add additional attributes specific to the channel type, and then save
         /// list to same cached object so that property filter lists our collection of properties/attributes
@@ -989,7 +989,9 @@ $(document).ready(function() {
                 {
                     var entityType = entityTypeCache.GetEntityType();
 
-                    HttpContext.Current.Items.Remove( string.Format( "EntityHelper:GetEntityFields:{0}", entityType.FullName ) );
+                    /// See above comments on HackEntityFields** to see why we are doing this
+                    HttpContext.Current.Items.Remove( Rock.Reporting.EntityHelper.GetCacheKey( entityType ) );
+
                     var entityFields = Rock.Reporting.EntityHelper.GetEntityFields( entityType );
                     foreach( var entityField in entityFields
                         .Where( f => 
@@ -997,10 +999,18 @@ $(document).ready(function() {
                             f.AttributeGuid.HasValue )
                         .ToList() )
                     {
+                        // remove EntityFields that aren't attributes for this ContentChannelType or ChannelChannel (to avoid duplicate Attribute Keys)
                         var attribute = AttributeCache.Read( entityField.AttributeGuid.Value );
                         if ( attribute != null && 
                             attribute.EntityTypeQualifierColumn == "ContentChannelTypeId" && 
                             attribute.EntityTypeQualifierValue.AsInteger() != channel.ContentChannelTypeId )
+                        {
+                            entityFields.Remove( entityField );
+                        }
+
+                        if ( attribute != null &&
+                            attribute.EntityTypeQualifierColumn == "ContentChannelId" &&
+                            attribute.EntityTypeQualifierValue.AsInteger() != channel.Id )
                         {
                             entityFields.Remove( entityField );
                         }
@@ -1045,7 +1055,7 @@ $(document).ready(function() {
                         }
 
                         // Save new fields to cache ( which report field will use instead of reading them again )
-                        HttpContext.Current.Items[string.Format( "EntityHelper:GetEntityFields:{0}", entityType.FullName )] = sortedFields;
+                        HttpContext.Current.Items[Rock.Reporting.EntityHelper.GetCacheKey( entityType )] = sortedFields;
                     }
 
                     return entityFields;
