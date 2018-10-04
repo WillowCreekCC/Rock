@@ -1001,9 +1001,59 @@ namespace Rock.Model
         /// Get a list of all inherited Attributes that should be applied to this entity.
         /// </summary>
         /// <returns>A list of all inherited AttributeCache objects.</returns>
-        public override List<AttributeCache> GetInheritedAttributes( Rock.Data.RockContext rockContext )
+        public override List<AttributeCache> GetInheritedAttributes( RockContext rockContext )
         {
-            return GetInheritedAttributesForQualifier( rockContext, TypeId, "Id" );
+            var attributes = new List<AttributeCache>();
+
+            var groupTypeIds = GetInheritedGroupTypeIds( rockContext );
+
+            if ( !groupTypeIds.Any() )
+            {
+                return attributes;
+            }
+
+            var inheritedGroupTypes = new GroupTypeService( rockContext ).GetByIds( groupTypeIds ).ToList();
+            var inheritedAttributes = new List<List<AttributeCache>>();
+
+            //
+            // Walk each group type and generate a list of matching attributes.
+            //
+            foreach ( var entityAttributes in AttributeCache.GetByEntity( TypeId ) )
+            {
+                var propertyInfo = GetType().GetProperty( entityAttributes.EntityTypeQualifierColumn );
+
+                if ( propertyInfo != null )
+                {
+                    var qualifierValue = entityAttributes.EntityTypeQualifierValue;
+
+                    // Get all the values for this qualifier from the inherited Group Types
+                    var inheritedQualifierValues = inheritedGroupTypes.Select( gt => propertyInfo.GetValue( gt, null ) ).Where( gt => gt != null ).Select( gt => gt.ToString() ).ToList();
+
+                    // If any of the inherited Group Types have a value that matches the one on this set of attributes, add these attributes
+                    if ( inheritedQualifierValues.Contains( qualifierValue ) )
+                    {
+                        var attributeList = new List<AttributeCache>();
+                        foreach ( var attributeId in entityAttributes.AttributeIds )
+                        {
+                            attributeList.Add( AttributeCache.Get( attributeId ) );
+                        }
+
+                        inheritedAttributes.Add( attributeList );
+                    }
+                }
+            }
+
+            //
+            // Walk the generated list of attribute groups and put them, ordered, into a list
+            // of inherited attributes.
+            //
+
+            foreach ( var attributeGroup in inheritedAttributes )
+            {
+                attributes.AddRange( attributeGroup.OrderBy( a => a.Order ) );
+            }
+
+            return attributes;
         }
 
         /// <summary>
